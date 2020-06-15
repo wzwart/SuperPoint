@@ -31,7 +31,7 @@ class SuperPoint(BaseModel):
 
         def net(image):
             if config['data_format'] == 'channels_first':
-                image = tf.transpose(image, [0, 3, 1, 2])
+                image = tf.transpose(a=image, perm=[0, 3, 1, 2])
             features = vgg_backbone(image, **config)
             detections = utils.detector_head(features, **config)
             descriptors = utils.descriptor_head(features, **config)
@@ -50,8 +50,8 @@ class SuperPoint(BaseModel):
             prob = tf.map_fn(lambda p: utils.box_nms(
                 p, config['nms'], keep_top_k=config['top_k']), prob)
             results['prob_nms'] = prob
-        results['pred'] = tf.to_int32(tf.greater_equal(
-            prob, config['detection_threshold']))
+        results['pred'] = tf.cast(tf.greater_equal(
+            prob, config['detection_threshold']), dtype=tf.int32)
 
         return results
 
@@ -63,10 +63,10 @@ class SuperPoint(BaseModel):
 
         # Switch to 'channels last' once and for all
         if config['data_format'] == 'channels_first':
-            logits = tf.transpose(logits, [0, 2, 3, 1])
-            warped_logits = tf.transpose(warped_logits, [0, 2, 3, 1])
-            descriptors = tf.transpose(descriptors, [0, 2, 3, 1])
-            warped_descriptors = tf.transpose(warped_descriptors, [0, 2, 3, 1])
+            logits = tf.transpose(a=logits, perm=[0, 2, 3, 1])
+            warped_logits = tf.transpose(a=warped_logits, perm=[0, 2, 3, 1])
+            descriptors = tf.transpose(a=descriptors, perm=[0, 2, 3, 1])
+            warped_descriptors = tf.transpose(a=warped_descriptors, perm=[0, 2, 3, 1])
 
         # Compute the loss for the detector head
         detector_loss = utils.detector_loss(
@@ -81,10 +81,10 @@ class SuperPoint(BaseModel):
                 descriptors, warped_descriptors, outputs['homography'],
                 valid_mask=inputs['warped']['valid_mask'], **config)
 
-        tf.summary.scalar('detector_loss1', detector_loss)
-        tf.summary.scalar('detector_loss2', warped_detector_loss)
-        tf.summary.scalar('detector_loss_full', detector_loss + warped_detector_loss)
-        tf.summary.scalar('descriptor_loss', config['lambda_loss'] * descriptor_loss)
+        tf.compat.v1.summary.scalar('detector_loss1', detector_loss)
+        tf.compat.v1.summary.scalar('detector_loss2', warped_detector_loss)
+        tf.compat.v1.summary.scalar('detector_loss_full', detector_loss + warped_detector_loss)
+        tf.compat.v1.summary.scalar('descriptor_loss', config['lambda_loss'] * descriptor_loss)
 
         loss = (detector_loss + warped_detector_loss
                 + config['lambda_loss'] * descriptor_loss)
@@ -94,7 +94,7 @@ class SuperPoint(BaseModel):
         pred = inputs['valid_mask'] * outputs['pred']
         labels = inputs['keypoint_map']
 
-        precision = tf.reduce_sum(pred * labels) / tf.reduce_sum(pred)
-        recall = tf.reduce_sum(pred * labels) / tf.reduce_sum(labels)
+        precision = tf.reduce_sum(input_tensor=pred * labels) / tf.reduce_sum(input_tensor=pred)
+        recall = tf.reduce_sum(input_tensor=pred * labels) / tf.reduce_sum(input_tensor=labels)
 
         return {'precision': precision, 'recall': recall}

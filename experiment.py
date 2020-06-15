@@ -9,6 +9,7 @@ from json import dumps as pprint
 from superpoint.datasets import get_dataset
 from superpoint.models import get_model
 from superpoint.utils.stdout_capturing import capture_outputs
+from superpoint.utils.redirect import stdout_redirector
 from superpoint.settings import EXPER_PATH
 
 logging.basicConfig(format='[%(asctime)s %(levelname)s] %(message)s',
@@ -51,12 +52,13 @@ def predict(config, output_dir, n_iter):
 
 
 def set_seed(seed):
-    tf.set_random_seed(seed)
+    tf.compat.v1.set_random_seed(seed)
     np.random.seed(seed)
 
-
 def get_num_gpus():
-    return len(os.environ['CUDA_VISIBLE_DEVICES'].split(','))
+    local_device_protos = tf.python.client.device_lib.list_local_devices()
+    return len ([x.name for x in local_device_protos if x.device_type == 'GPU'])
+
 
 
 @contextmanager
@@ -75,7 +77,7 @@ def _init_graph(config, with_dataset=False):
     else:
         yield model
     model.__exit__()
-    tf.reset_default_graph()
+    tf.compat.v1.reset_default_graph()
 
 
 def _cli_train(config, output_dir, args):
@@ -142,7 +144,8 @@ if __name__ == '__main__':
     output_dir = os.path.join(EXPER_PATH, args.exper_name)
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
-
-    with capture_outputs(os.path.join(output_dir, 'log')):
+    assert os.path.isdir(output_dir)
+#    with capture_outputs(os.path.join(output_dir, 'log')):
+    with stdout_redirector(os.path.join(output_dir, 'log')):
         logging.info('Running command {}'.format(args.command.upper()))
         args.func(config, output_dir, args)

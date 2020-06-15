@@ -102,7 +102,7 @@ class BaseModel(metaclass=ABCMeta):
         self.datasets = data
         self.data_shape = data_shape
         self.n_gpus = n_gpus
-        self.graph = tf.get_default_graph()
+        self.graph = tf.compat.v1.get_default_graph()
         self.name = self.__class__.__name__.lower()  # get child name
         self.trainable = getattr(self, 'trainable', True)
 
@@ -118,7 +118,7 @@ class BaseModel(metaclass=ABCMeta):
             'Unknown dataset name: {}'.format(set(self.datasets)-self.dataset_names)
         assert n_gpus > 0, 'TODO: CPU-only training is currently not supported.'
 
-        with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
+        with tf.compat.v1.variable_scope(self.name, reuse=tf.compat.v1.AUTO_REUSE):
             self._build_graph()
 
     def _unstack_nested_dict(self, d, num):
@@ -138,7 +138,7 @@ class BaseModel(metaclass=ABCMeta):
     def _gpu_tower(self, data, mode, batch_size):
         # Split the batch between the GPUs (data parallelism)
         with tf.device('/cpu:0'):
-            with tf.name_scope('{}_data_sharding'.format(mode)):
+            with tf.compat.v1.name_scope('{}_data_sharding'.format(mode)):
                 shards = self._unstack_nested_dict(data, batch_size*self.n_gpus)
                 shards = self._shard_nested_dict(shards, self.n_gpus)
 
@@ -150,22 +150,22 @@ class BaseModel(metaclass=ABCMeta):
         tower_metrics = []
         for i in range(self.n_gpus):
             worker = '/gpu:{}'.format(i)
-            device_setter = tf.train.replica_device_setter(
+            device_setter = tf.compat.v1.train.replica_device_setter(
                     worker_device=worker, ps_device='/cpu:0', ps_tasks=1)
-            with tf.name_scope('{}_tower{}'.format(mode, i)) as scope:
+            with tf.compat.v1.name_scope('{}_tower{}'.format(mode, i)) as scope:
                 with tf.device(device_setter):
                     net_outputs = self._model(shards[i], mode, **self.config)
                     if mode == Mode.TRAIN:
                         loss = self._loss(net_outputs, shards[i], **self.config)
                         loss += tf.reduce_sum(
-                                tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES,
+                                input_tensor=tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES,
                                                   scope))
-                        model_params = tf.trainable_variables()
-                        grad = tf.gradients(loss, model_params)
+                        model_params = tf.compat.v1.trainable_variables()
+                        grad = tf.gradients(ys=loss, xs=model_params)
                         tower_losses.append(loss)
                         tower_gradvars.append(zip(grad, model_params))
                         if i == 0:
-                            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS,
+                            update_ops = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS,
                                                            scope)
                     elif mode == Mode.EVAL:
                         tower_metrics.append(self._metrics(
@@ -191,7 +191,7 @@ class BaseModel(metaclass=ABCMeta):
         gradvars = []
         with tf.device('/cpu:0'):
             # Average losses and gradients
-            with tf.name_scope('tower_averaging'):
+            with tf.compat.v1.name_scope('tower_averaging'):
                 all_grads = {}
                 for grad, var in itertools.chain(*tower_gradvars):
                     if grad is not None:
@@ -202,12 +202,12 @@ class BaseModel(metaclass=ABCMeta):
                     else:
                         avg_grad = tf.multiply(tf.add_n(grads), 1. / len(grads))
                     gradvars.append((avg_grad, var))
-                self.loss = tf.reduce_mean(tower_losses)
-                tf.summary.scalar('loss', self.loss)
+                self.loss = tf.reduce_mean(input_tensor=tower_losses)
+                tf.compat.v1.summary.scalar('loss', self.loss)
 
             # Create optimizer ops
             self.global_step = tf.Variable(0, trainable=False, name='global_step')
-            opt = tf.train.AdamOptimizer(self.config['learning_rate'])
+            opt = tf.compat.v1.train.AdamOptimizer(self.config['learning_rate'])
             with tf.control_dependencies(update_ops):
                 self.trainer = opt.apply_gradients(
                         gradvars, global_step=self.global_step)
@@ -215,7 +215,7 @@ class BaseModel(metaclass=ABCMeta):
     def _eval_graph(self, data):
         tower_metrics = self._gpu_tower(data, Mode.EVAL, self.config['eval_batch_size'])
         with tf.device('/cpu:0'):
-            self.metrics = {m: tf.reduce_mean(tf.stack([t[m] for t in tower_metrics]))
+            self.metrics = {m: tf.reduce_mean(input_tensor=tf.stack([t[m] for t in tower_metrics]))
                             for m in tower_metrics[0]}
 
     def _pred_graph(self, data):
@@ -234,11 +234,11 @@ class BaseModel(metaclass=ABCMeta):
                         train_batch = self.config['batch_size']*self.n_gpus
                         d = d.repeat().padded_batch(
                                 train_batch, output_shapes).prefetch(train_batch)
-                        self.dataset_iterators[n] = d.make_one_shot_iterator()
+                        self.dataset_iterators[n] = tf.compat.v1.data.make_one_shot_iterator(d)
                     else:
                         d = d.padded_batch(self.config['eval_batch_size']*self.n_gpus,
                                            output_shapes)
-                        self.dataset_iterators[n] = d.make_initializable_iterator()
+                        self.dataset_iterators[n] = tf.compat.v1.data.make_initializable_iterator(d)
                     output_types = d.output_types
                     output_shapes = d.output_shapes
                     self.datasets[n] = d
@@ -254,8 +254,8 @@ class BaseModel(metaclass=ABCMeta):
                     self.data_shape = output_shapes
 
                 # Handle for the feedable iterator
-                self.handle = tf.placeholder(tf.string, shape=[])
-                iterator = tf.data.Iterator.from_string_handle(
+                self.handle = tf.compat.v1.placeholder(tf.string, shape=[])
+                iterator = tf.compat.v1.data.Iterator.from_string_handle(
                         self.handle, output_types, output_shapes)
                 data = iterator.get_next()
 
@@ -263,20 +263,20 @@ class BaseModel(metaclass=ABCMeta):
             if self.trainable:
                 self._train_graph(data)
             self._eval_graph(data)
-            self.summaries = tf.summary.merge_all()
+            self.summaries = tf.compat.v1.summary.merge_all()
 
         # Prediction network with feed_dict
         if self.data_shape is None:
             self.data_shape = {i: spec['shape'] for i, spec in self.input_spec.items()}
-        self.pred_in = {i: tf.placeholder(spec['type'], shape=self.data_shape[i], name=i)
+        self.pred_in = {i: tf.compat.v1.placeholder(spec['type'], shape=self.data_shape[i], name=i)
                         for i, spec in self.input_spec.items()}
         self._pred_graph(self.pred_in)
 
         # Start session
-        sess_config = tf.ConfigProto(device_count={'GPU': self.n_gpus},
+        sess_config = tf.compat.v1.ConfigProto(device_count={'GPU': self.n_gpus},
                                      allow_soft_placement=True)
         sess_config.gpu_options.allow_growth = True
-        self.sess = tf.Session(config=sess_config)
+        self.sess = tf.compat.v1.Session(config=sess_config)
 
         # Register tf dataset handles
         if self.datasets:
@@ -284,28 +284,28 @@ class BaseModel(metaclass=ABCMeta):
             for n, i in self.dataset_iterators.items():
                 self.dataset_handles[n] = self.sess.run(i.string_handle())
 
-        self.sess.run([tf.global_variables_initializer(),
-                       tf.local_variables_initializer()])
+        self.sess.run([tf.compat.v1.global_variables_initializer(),
+                       tf.compat.v1.local_variables_initializer()])
 
     def train(self, iterations, validation_interval=100, output_dir=None, profile=False,
               save_interval=None, checkpoint_path=None, keep_checkpoints=1):
         assert self.trainable, 'Model is not trainable.'
         assert 'training' in self.datasets, 'Training dataset is required.'
         if output_dir is not None:
-            train_writer = tf.summary.FileWriter(output_dir)
+            train_writer = tf.compat.v1.summary.FileWriter(output_dir)
         if not hasattr(self, 'saver'):
             with tf.device('/cpu:0'):
-                self.saver = tf.train.Saver(save_relative_paths=True,
+                self.saver = tf.compat.v1.train.Saver(save_relative_paths=True,
                                             max_to_keep=keep_checkpoints)
         if not self.graph.finalized:
             self.graph.finalize()
         if profile:
-            options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-            run_metadata = tf.RunMetadata()
+            options = tf.compat.v1.RunOptions(trace_level=tf.compat.v1.RunOptions.FULL_TRACE)
+            run_metadata = tf.compat.v1.RunMetadata()
         else:
             options, run_metadata = None, None
 
-        tf.logging.info('Start training')
+        tf.compat.v1.logging.info('Start training')
         for i in range(iterations):
             loss, summaries, _ = self.sess.run(
                     [self.loss, self.summaries, self.trainer],
@@ -316,14 +316,14 @@ class BaseModel(metaclass=ABCMeta):
                 self.save(checkpoint_path)
             if 'validation' in self.datasets and i % validation_interval == 0:
                 metrics = self.evaluate('validation', mute=True)
-                tf.logging.info(
+                tf.compat.v1.logging.info(
                         'Iter {:4d}: loss {:.4f}'.format(i, loss) +
                         ''.join([', {} {:.4f}'.format(m, metrics[m]) for m in metrics]))
 
                 if output_dir is not None:
                     train_writer.add_summary(summaries, i)
-                    metrics_summaries = tf.Summary(value=[
-                        tf.Summary.Value(tag=m, simple_value=v)
+                    metrics_summaries = tf.compat.v1.Summary(value=[
+                        tf.compat.v1.Summary.Value(tag=m, simple_value=v)
                         for m, v in metrics.items()])
                     train_writer.add_summary(metrics_summaries, i)
 
@@ -333,7 +333,7 @@ class BaseModel(metaclass=ABCMeta):
                         with open(osp.join(output_dir,
                                            'profile_{}.json'.format(i)), 'w') as f:
                             f.write(chrome_trace)
-        tf.logging.info('Training finished')
+        tf.compat.v1.logging.info('Training finished')
 
     def predict(self, data, keys='pred', batch=False):
         assert set(data.keys()) >= set(self.input_spec.keys())
@@ -360,7 +360,7 @@ class BaseModel(metaclass=ABCMeta):
         self.sess.run(self.dataset_iterators[dataset].initializer)
 
         if not mute:
-            tf.logging.info('Starting evaluation of dataset \'{}\''.format(dataset))
+            tf.compat.v1.logging.info('Starting evaluation of dataset \'{}\''.format(dataset))
             if max_iterations:
                 pbar = tqdm(total=max_iterations, ascii=True)
         i = 0
@@ -378,7 +378,7 @@ class BaseModel(metaclass=ABCMeta):
                 if i == max_iterations:
                     break
         if not mute:
-            tf.logging.info('Finished evaluation')
+            tf.compat.v1.logging.info('Finished evaluation')
             if max_iterations:
                 pbar.close()
 
@@ -389,8 +389,8 @@ class BaseModel(metaclass=ABCMeta):
 
     def load(self, checkpoint_path):
         with tf.device('/cpu:0'):
-            saver = tf.train.Saver(save_relative_paths=True)
-        if tf.gfile.IsDirectory(checkpoint_path):
+            saver = tf.compat.v1.train.Saver(save_relative_paths=True)
+        if tf.io.gfile.isdir(checkpoint_path):
             checkpoint_path = tf.train.latest_checkpoint(checkpoint_path)
             if checkpoint_path is None:
                 raise ValueError('Checkpoint directory is empty.')
@@ -398,7 +398,7 @@ class BaseModel(metaclass=ABCMeta):
 
     def save(self, checkpoint_path):
         step = self.sess.run(self.global_step)
-        tf.logging.info('Saving checkpoint for iteration #{}'.format(step))
+        tf.compat.v1.logging.info('Saving checkpoint for iteration #{}'.format(step))
         self.saver.save(self.sess, checkpoint_path, write_meta_graph=False,
                         global_step=step)
 

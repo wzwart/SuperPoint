@@ -14,7 +14,7 @@ class SimpleClassifier(BaseModel):
     def _model(self, inputs, mode, **config):
         x = inputs['image']
         if config['data_format'] == 'channels_first':
-            x = tf.transpose(x, [0, 3, 1, 2])
+            x = tf.transpose(a=x, perm=[0, 3, 1, 2])
 
         params = {'padding': 'SAME', 'data_format': config['data_format']}
 
@@ -31,18 +31,18 @@ class SimpleClassifier(BaseModel):
         if mode == Mode.TRAIN:
             return {'logits': x}
         else:
-            return {'logits': x, 'prob': tf.nn.softmax(x), 'pred': tf.argmax(x, axis=-1)}
+            return {'logits': x, 'prob': tf.nn.softmax(x), 'pred': tf.argmax(input=x, axis=-1)}
 
     def _loss(self, outputs, inputs, **config):
-        with tf.name_scope('loss'):
-            loss = tf.reduce_mean(tf.losses.sparse_softmax_cross_entropy(
+        with tf.compat.v1.name_scope('loss'):
+            loss = tf.reduce_mean(input_tensor=tf.compat.v1.losses.sparse_softmax_cross_entropy(
                     labels=inputs['label'], logits=outputs['logits']))
         return loss
 
     def _metrics(self, outputs, inputs, **config):
         metrics = {}
-        with tf.name_scope('metrics'):
+        with tf.compat.v1.name_scope('metrics'):
             correct_count = tf.equal(outputs['pred'], inputs['label'])
             correct_count = tf.cast(correct_count, tf.float32)
-            metrics['accuracy'] = tf.reduce_mean(correct_count)
+            metrics['accuracy'] = tf.reduce_mean(input_tensor=correct_count)
         return metrics

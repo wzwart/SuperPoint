@@ -27,3 +27,4 @@ def plot_imgs(imgs, titles=None, cmap='brg', ylabel='', normalize=False, ax=None
             spine.set_visible(False)
     ax[0].set_ylabel(ylabel)
     plt.tight_layout()
+    return ax

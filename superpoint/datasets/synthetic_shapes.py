@@ -1,4 +1,4 @@
-mport numpy as np
+import numpy as np
 import tensorflow as tf
 import cv2
 import os
@@ -68,9 +68,9 @@ class SyntheticShapes(BaseDataset):
     ]
 
     def dump_primitive_data(self, primitive, tar_path, config):
-        temp_dir = Path(os.environ['TMPDIR'], primitive)
+        temp_dir = 'tmp'
 
-        tf.logging.info('Generating tarfile for primitive {}.'.format(primitive))
+        tf.compat.v1.logging.info('Generating tarfile for primitive {}.'.format(primitive))
         synthetic_dataset.set_random_state(np.random.RandomState(
                 config['generation']['random_seed']))
         for split, size in self.config['generation']['split_sizes'].items():
@@ -101,7 +101,7 @@ class SyntheticShapes(BaseDataset):
         tar.add(temp_dir, arcname=primitive)
         tar.close()
         shutil.rmtree(temp_dir)
-        tf.logging.info('Tarfile dumped to {}.'.format(tar_path))
+        tf.compat.v1.logging.info('Tarfile dumped to {}.'.format(tar_path))
 
     def _init_dataset(self, **config):
         # Parse drawing primitives
@@ -126,7 +126,7 @@ class SyntheticShapes(BaseDataset):
                 self.dump_primitive_data(primitive, tar_path, config)
 
             # Untar locally
-            tf.logging.info('Extracting archive for primitive {}.'.format(primitive))
+            tf.compat.v1.logging.info('Extracting archive for primitive {}.'.format(primitive))
             tar = tarfile.open(tar_path)
             temp_dir = Path(os.environ['TMPDIR'])
             tar.extractall(path=temp_dir)
@@ -164,7 +164,7 @@ class SyntheticShapes(BaseDataset):
                        np.flip(points.astype(np.float32), 1))
 
         def _read_image(filename):
-            image = tf.read_file(filename)
+            image = tf.io.read_file(filename)
             image = tf.image.decode_png(image, channels=1)
             return tf.cast(image, tf.float32)
 
@@ -186,7 +186,7 @@ class SyntheticShapes(BaseDataset):
             # Read image and point coordinates
             data = data.map(
                     lambda image, points:
-                    (_read_image(image), tf.py_func(_read_points, [points], tf.float32)))
+                    (_read_image(image), tf.compat.v1.py_func(_read_points, [points], tf.float32)))
             data = data.map(lambda image, points: (image, tf.reshape(points, [-1, 2])))
 
         if split_name == 'validation':
@@ -198,7 +198,7 @@ class SyntheticShapes(BaseDataset):
         data = data.map(pipeline.add_dummy_valid_mask)
 
         if config['cache_in_memory'] and not config['on-the-fly']:
-            tf.logging.info('Caching data, fist access will take some time.')
+            tf.compat.v1.logging.info('Caching data, fist access will take some time.')
             data = data.cache()
 
         # Apply augmentation
@@ -212,6 +212,6 @@ class SyntheticShapes(BaseDataset):
 
         # Convert the point coordinates to a dense keypoint map
         data = data.map_parallel(pipeline.add_keypoint_map)
-        data = data.map_parallel(lambda d: {**d, 'image': tf.to_float(d['image']) / 255.})
+        data = data.map_parallel(lambda d: {**d, 'image': tf.cast(d['image'], dtype=tf.float32) / 255.})
 
         return data

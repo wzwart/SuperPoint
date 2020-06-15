@@ -27,7 +27,7 @@ class MagicPoint(BaseModel):
 
         def net(image):
             if config['data_format'] == 'channels_first':
-                image = tf.transpose(image, [0, 3, 1, 2])
+                image = tf.transpose(a=image, perm=[0, 3, 1, 2])
             features = vgg_backbone(image, **config)
             outputs = detector_head(features, **config)
             return outputs
@@ -43,14 +43,14 @@ class MagicPoint(BaseModel):
                                                min_prob=config['detection_threshold'],
                                                keep_top_k=config['top_k']), prob)
             outputs['prob_nms'] = prob
-        pred = tf.to_int32(tf.greater_equal(prob, config['detection_threshold']))
+        pred = tf.cast(tf.greater_equal(prob, config['detection_threshold']), dtype=tf.int32)
         outputs['pred'] = pred
 
         return outputs
 
     def _loss(self, outputs, inputs, **config):
         if config['data_format'] == 'channels_first':
-            outputs['logits'] = tf.transpose(outputs['logits'], [0, 2, 3, 1])
+            outputs['logits'] = tf.transpose(a=outputs['logits'], perm=[0, 2, 3, 1])
         return detector_loss(inputs['keypoint_map'], outputs['logits'],
                              valid_mask=inputs['valid_mask'], **config)
 
@@ -58,7 +58,7 @@ class MagicPoint(BaseModel):
         pred = inputs['valid_mask'] * outputs['pred']
         labels = inputs['keypoint_map']
 
-        precision = tf.reduce_sum(pred * labels) / tf.reduce_sum(pred)
-        recall = tf.reduce_sum(pred * labels) / tf.reduce_sum(labels)
+        precision = tf.reduce_sum(input_tensor=pred * labels) / tf.reduce_sum(input_tensor=pred)
+        recall = tf.reduce_sum(input_tensor=pred * labels) / tf.reduce_sum(input_tensor=labels)
 
         return {'precision': precision, 'recall': recall}

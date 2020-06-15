@@ -5,7 +5,7 @@ import yaml
 from pathlib import Path
 from tqdm import tqdm
 
-import experiment
+# import experiment
 from superpoint.settings import EXPER_PATH
 
 
