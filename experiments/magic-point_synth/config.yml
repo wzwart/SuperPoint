@@ -49,7 +49,16 @@ data:
       - additive_gaussian_noise
       - additive_shade
       - motion_blur
-  cache_in_memory: true
+  cache_in_memory: false
+  generation:
+    debug_image: true
+    force_synthesis: false
+    min_angle: 22.5
+    split_sizes:
+      test: 20
+      training: 20
+      validation: 20
+    with_fg: true
   name: synthetic_shapes
   preprocessing:
     blur_size: 21
@@ -57,17 +66,17 @@ data:
     - 120
     - 160
   primitives: all
-  suffix: v6
+  suffix: v7
   truncate:
     draw_ellipses: 0.3
     draw_stripes: 0.2
     gaussian_noise: 0.1
-  validation_size: 500
+  validation_size: 200
 eval_iter: 200
 model:
-  batch_size: 64
+  batch_size: 20
   detection_threshold: 0.001
-  eval_batch_size: 50
+  eval_batch_size: 20
   kernel_reg: 0.0
   learning_rate: 0.001
   name: magic_point

@@ -1,20 +1,15 @@
 import cv2 as cv
 import numpy as np
-from math import cos,sin, pi, sqrt
+from math import cos,sin, pi, sqrt, atan
 from shapely.geometry import Polygon , LineString, Point, LinearRing
 from shapely.errors import TopologicalError
 from shapely.validation import explain_validity
-
-
 import sys
 
-from math import atan, pi
 
 import matplotlib.pyplot as plt
 """ Module used to generate geometrical synthetic shapes """
-
 random_state = np.random.RandomState(None)
-
 
 def set_random_state(state):
     global random_state
@@ -80,7 +75,7 @@ def generate_background(size=(960, 1280), nb_blobs=100, min_rad_ratio=0.01,
     for i in range(nb_blobs):
         col = get_random_color(background_color)
         cv.circle(img, (blobs[i][0], blobs[i][1]),
-                  np.random.randint(int(dim * min_rad_ratio),
+                  random_state.randint(int(dim * min_rad_ratio),
                                     int(dim * max_rad_ratio)),
                   col, -1)
     kernel_size = random_state.randint(min_kernel_size, max_kernel_size)
@@ -98,14 +93,14 @@ def generate_custom_background(size, background_color, nb_blobs=3000,
     """
     img = np.zeros(size, dtype=np.uint8)
     img = img + get_random_color(background_color)
-    blobs = np.concatenate([np.random.randint(0, size[1], size=(nb_blobs, 1)),
-                            np.random.randint(0, size[0], size=(nb_blobs, 1))],
+    blobs = np.concatenate([random_state.randint(0, size[1], size=(nb_blobs, 1)),
+                            random_state.randint(0, size[0], size=(nb_blobs, 1))],
                            axis=1)
     for i in range(nb_blobs):
         col = get_random_color(background_color)
         cv.circle(img, (blobs[i][0], blobs[i][1]),
-                  np.random.randint(20), col, -1)
-    kernel_size = np.random.randint(kernel_boundaries[0], kernel_boundaries[1])
+                  random_state.randint(20), col, -1)
+    kernel_size = random_state.randint(kernel_boundaries[0], kernel_boundaries[1])
     cv.blur(img, (kernel_size, kernel_size), img)
     return img
 
@@ -162,7 +157,7 @@ def poly_to_np(poly):
 
     return np.asarray([np.asarray(x), np.asarray(y)]).T
 
-def polygon_within_polygon(polygon, within_polygon):
+def polygon_within_polygon(polygon, within_polygon, silent=False):
     debug_mode=False
     try:
         polygon_as_polygon=Polygon(polygon)
@@ -170,7 +165,8 @@ def polygon_within_polygon(polygon, within_polygon):
         for p in [polygon_as_polygon,witin_polygon_as_polygon]:
             valid=explain_validity(p)
             if not valid=="Valid Geometry":
-                print("Invalid Polygon", valid)
+                if not silent:
+                    print("Invalid Polygon", valid)
                 return None
 
         intersection= Polygon(polygon).intersection(Polygon(within_polygon))
@@ -216,7 +212,6 @@ def polygon_within_polygon(polygon, within_polygon):
 
 def line_within_polygon(line, within_polygon):
 
-    # return poly_to_np(LineString(line).intersection(Polygon(within_polygon)))
     return poly_to_np(Polygon(within_polygon).intersection(LineString(line)))
 
 
@@ -226,16 +221,27 @@ def calculate_intersection(line_a,line_b):
     line_1= np.asarray(line_a)
     line_2= np.asarray(line_b)
     # if any of the two lines are vertical:
-    if (line_1[0,0]==line_1[1,0]) or (line_2[0,0]==line_2[1,0]):
-        # swap x and y
-        flipped = True
-    else:
-        flipped = False
-    if flipped:
+
+    line_1_is_horizontal = line_1[0,0]==line_1[1,0]
+    line_2_is_horizontal = line_2[0,0]==line_2[1,0]
+    line_1_is_vertical = line_1[0,1]==line_1[1,1]
+    line_2_is_vertical = line_2[0,1]==line_2[1,1]
+
+    flip =  (line_1_is_horizontal or line_2_is_horizontal) and not (line_1_is_vertical or line_2_is_vertical)
+
+    slant =  (line_1_is_horizontal and line_2_is_vertical) or (line_1_is_vertical and line_2_is_horizontal)
+
+    if flip:
         line_1=np.flip(line_1, axis=1)
         line_2=np.flip(line_2, axis=1)
+    elif slant:
+        A=np.asarray([[1,1],[1,-1]])
+        line_1 = np.dot(line_1,A)
+        line_2 = np.dot(line_2,A)
+
     a_1=(line_1[0,1]-line_1[1,1])/(line_1[0,0]-line_1[1,0])
     b_1= line_1[0,1]-a_1*line_1[0,0]
+
     a_2=(line_2[0,1]-line_2[1,1])/(line_2[0,0]-line_2[1,0])
     b_2= line_2[0,1]-a_2*line_2[0,0]
     if a_2==a_1:
@@ -244,12 +250,14 @@ def calculate_intersection(line_a,line_b):
     angle = np.abs(180*(atan(a_1)-atan(a_2))/pi)
     x=(b_1-b_2)/(a_2-a_1)
     y=a_1*x+b_1
-    if flipped:
+    if flip:
         return (y,x), angle
+    elif slant:
+        return ((x+y)/2, (x-y)/2), angle
     else:
         return (x,y), angle
 
-def create_bg_polygon(img, max_sides=8):
+def create_fg_polygon(img, max_sides=8):
     """ Draw a polygon with a random number of corners
     and return the corner points
     Parameters:
@@ -270,7 +278,7 @@ def create_bg_polygon(img, max_sides=8):
         image_bounding_box= np.asarray([[0,0],[0, img.shape[0]],[img.shape[1],img.shape[0]],[img.shape[1],0]])
         # print("try")
         try:
-            points = polygon_within_polygon(points, image_bounding_box)
+            points = polygon_within_polygon(points, image_bounding_box, silent=True)
             done = not points is None
         except:
             done = False
@@ -307,7 +315,7 @@ def calc_salient_points_from_line(line, poly_fg, min_angle=15):
         if intersect_2d(polygon_segment[0], polygon_segment[1], line[0], line[1]):
             intersection_point, angle = (calculate_intersection(polygon_segment, line))
             if not intersection_point is None:
-                if angle > min_angle:
+                if  min_angle < angle < 180-min_angle:
                     points.append(intersection_point)
     if Polygon(poly_fg).contains(Point(line[0])):
         points.append(line[0])
@@ -317,7 +325,7 @@ def calc_salient_points_from_line(line, poly_fg, min_angle=15):
     return points
 
 
-def calc_salient_points_from_ellipse(x,y,ax,ay,angle, poly_fg, min_angle=22):
+def calc_salient_points_from_ellipse(x1,y1,ax1,ay1,angle1, poly_fg, min_angle=15):
 
     polygon_segments = []
     for i in range(len(poly_fg) - 1):
@@ -326,7 +334,22 @@ def calc_salient_points_from_ellipse(x,y,ax,ay,angle, poly_fg, min_angle=22):
         print("closing the loop")
         polygon_segments.append([poly_fg[-1], poly_fg[0]])
     points = []
-    for line in polygon_segments:
+    for line2 in polygon_segments:
+        flip =  line2[0][0]==line2[1][0]
+        if flip:
+            x = y1
+            y = x1
+            ax = ay1
+            ay = ax1
+            angle = angle1
+            line = np.flip(line2.copy(), axis=1)
+        else:
+            x = x1
+            y = y1
+            ax = ax1
+            ay = ay1
+            angle = angle1
+            line=line2.copy()
         a_ps=(line[0][1]-line[1][1])/(line[0][0]-line[1][0])
         b_ps= line[0][1]-a_ps*(line[0][0]-x)-y
 
@@ -350,12 +373,13 @@ def calc_salient_points_from_ellipse(x,y,ax,ay,angle, poly_fg, min_angle=22):
             yd_0 = a_ps * (xd_0) + b_ps
             rc_0 = (-2 * A * xd_0 - B * yd_0) / (2 * C * yd_0 + B * xd_0)
 
-            L=40
-
             if within_box([x_0,y_0], line):
                 if min_angle<180*abs(atan(rc_0)-atan(a_ps))/pi<180-min_angle:
-                    points.append([x_0,y_0])
-                    # points.append([x_0+L, y_0+L*rc_0])
+                    if flip:
+                        points.append([y_0, x_0])
+                    else:
+                        points.append([x_0, y_0])
+
 
             x_1= (-b - sqrt(D))/(2*a)+x
             y_1=a_ps*(x_1-x)+b_ps+y
@@ -367,9 +391,11 @@ def calc_salient_points_from_ellipse(x,y,ax,ay,angle, poly_fg, min_angle=22):
 
             if within_box([x_1,y_1], line):
                 if min_angle<180*abs(atan(rc_1)-atan(a_ps))/pi<180-min_angle:
+                    if flip:
+                        points.append([y_1, x_1])
+                    else:
+                        points.append([x_1,y_1])
 
-                    points.append([x_1,y_1])
-                    # points.append([x_1+L, y_1+L*rc_1])
     points = np.asarray(points).astype(np.int)
     return points
 
@@ -381,6 +407,7 @@ def within_box(point, box):
     return  within_range( point[0], [box[0][0],box[1][0]]) and within_range( point[1], [box[0][1],box[1][1]])
 
 def append_points(points, new_points):
+    new_points=new_points.reshape((-1,2))
     for point_from_line in new_points:
         is_in_new_point = False
         for new_point in points:
@@ -412,7 +439,39 @@ def calc_salient_points_from_poly(poly, poly_fg, min_angle=15):
     return new_poly
 
 
-def draw_lines(img, nb_lines=10, fg_poly=None):
+def calc_salient_points_on_poly_fg(poly_fg, min_angle=15):
+    new_points = np.empty((0, 2), dtype=np.int)
+    # shadow_points = np.empty((0, 2), dtype=np.int)
+    if not poly_fg is None:
+        if (poly_fg[-1]==poly_fg[0]).all(): # are we dealing we a closed polygon or not? If closed, ignore the last entry
+            N=len(poly_fg)-1
+        else:
+            N = len(poly_fg)
+        for i in range(N):
+
+            v1=poly_fg[i%N]-poly_fg[(i+1)%N]
+            v2=poly_fg[(i-1)%N]-poly_fg[i%N]
+            angle= angle_between_vectors(v1,v2)*180/pi
+            print(angle, min_angle<angle )
+            if  min_angle<angle :
+                new_points = append_points(new_points,poly_fg[i%N])
+    return new_points
+
+def remove_points_on_edge(points,img):
+    new_points = np.empty((0, 2), dtype=np.int)
+    for point in points:
+        if not (point[0]==0 or  point[1]==0 or point[0]==img.shape[1] or   point[1]==img.shape[0]):
+            new_points= np.vstack([new_points,point])
+    return new_points
+
+def finalize_salient_points(points,poly_fg, img, min_angle=15):
+    points = append_points(points,calc_salient_points_on_poly_fg(poly_fg, min_angle=min_angle))
+    return remove_points_on_edge(points,img)
+
+
+
+
+def draw_lines(img, nb_lines=10, fg_poly=None,min_angle=15):
     """ Draw random lines and output the positions of the endpoints
     Parameters:
       nb_lines: maximal number of lines
@@ -434,12 +493,12 @@ def draw_lines(img, nb_lines=10, fg_poly=None):
             continue
         line = np.asarray([[x1,y1],[x2,y2]])
         if not fg_poly is None:
-            points_from_line=  calc_salient_points_from_line(line, fg_poly, min_angle=15)
+            points_from_line=  calc_salient_points_from_line(line, fg_poly, min_angle=min_angle)
             if not points_from_line is None:
                 points_from_line=points_from_line.astype(np.int).reshape((-1,2))
                 points= np.concatenate([points, points_from_line ], axis=0)
         else:
-            points = np.concatenate([points, line[0],line[1]], axis=0)
+            points = np.concatenate([points, line], axis=0)
         segments = np.concatenate([segments, line.reshape((-1,2,2))], axis=0)
         col = get_random_color(background_color)
         thickness = random_state.randint(min_dim * 0.01, min_dim * 0.02)
@@ -448,7 +507,7 @@ def draw_lines(img, nb_lines=10, fg_poly=None):
 
 
 
-def draw_polygon(img, max_sides=8, fg_poly=None):
+def draw_polygon(img, max_sides=8, fg_poly=None, min_angle=15):
     """ Draw a polygon with a random number of corners
     and return the corner points
     Parameters:
@@ -462,7 +521,6 @@ def draw_polygon(img, max_sides=8, fg_poly=None):
     done = False
     counter =0
     while not done:
-        print('.')
         counter += 1
         if counter >100:
             return None
@@ -485,13 +543,11 @@ def draw_polygon(img, max_sides=8, fg_poly=None):
                                                points[(i+1) % num_corners, :] -
                                                points[i, :])
                          for i in range(num_corners)]
-        mask = np.array(corner_angles) < (2 * pi / 3)
-        points = points[mask, :]
         num_corners = points.shape[0]
         done = num_corners >=3
         corners = points.reshape((-1, 1, 2))
     if not fg_poly is None:
-        points= calc_salient_points_from_poly(points, fg_poly, min_angle=15)
+        points= calc_salient_points_from_poly(points, fg_poly, min_angle=min_angle)
     if len(corners) > 0 :
         cv.polylines(img, [corners], isClosed=True, color=255, thickness=3)
         col = get_random_color(int(np.mean(img)))
@@ -518,7 +574,7 @@ def angle_between_vectors(v1, v2):
     return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
 
 
-def draw_multiple_polygons(img, max_sides=8, nb_polygons=30, fg_poly= None, **extra):
+def draw_multiple_polygons(img, max_sides=8, nb_polygons=30, fg_poly= None, min_angle=15, **extra):
     """ Draw multiple polygons with a random number of corners
     and return the corner points
     Parameters:
@@ -594,7 +650,7 @@ def draw_multiple_polygons(img, max_sides=8, nb_polygons=30, fg_poly= None, **ex
         img[locs[0], locs[1]] = custom_background[locs[0], locs[1]]
 
         if not fg_poly is None:
-            new_points = calc_salient_points_from_poly(new_points, fg_poly, min_angle=15)
+            new_points = calc_salient_points_from_poly(new_points, fg_poly, min_angle=min_angle)
 
         points = np.concatenate([points, new_points], axis=0)
     return points
@@ -612,7 +668,7 @@ def line_with_ellipse(a, line):
     else:
         raise ValueError('something unexpected: ' + mp.geom_type)
 
-def draw_ellipses(img, nb_ellipses=20, fg_poly= None):
+def draw_ellipses(img, nb_ellipses=20, fg_poly= None,min_angle=15):
     """ Draw several ellipses
     Parameters:
       nb_ellipses: maximal number of ellipses
@@ -643,11 +699,10 @@ def draw_ellipses(img, nb_ellipses=20, fg_poly= None):
         if not fg_poly is None:
             new_points= calc_salient_points_from_ellipse(x,y,ax,ay,angle, fg_poly)
             salient_points = append_points(salient_points, new_points)
-
     return salient_points
 
 
-def draw_star(img, nb_branches=6, fg_poly=None):
+def draw_star(img, nb_branches=6, fg_poly=None, min_angle=15):
     """ Draw a star and output the interest points
     Parameters:
       nb_branches: number of branches of the star
@@ -677,14 +732,14 @@ def draw_star(img, nb_branches=6, fg_poly=None):
                 col, thickness)
         line= np.asarray([points[0],points[i]])
         if not fg_poly is None:
-            new_points = calc_salient_points_from_line(line, fg_poly, min_angle=15)
+            new_points = calc_salient_points_from_line(line, fg_poly, min_angle=min_angle)
             salient_points=append_points(salient_points,new_points)
     if not fg_poly is None:
         points= salient_points
     return points
 
 
-def draw_checkerboard(img, max_rows=7, max_cols=7, fg_poly=None, transform_params=(0.05, 0.15)):
+def draw_checkerboard(img, max_rows=7, max_cols=7, fg_poly=None, min_angle=15, transform_params=(0.05, 0.15)):
     """ Draw a checkerboard and output the interest points
     Parameters:
       max_rows: maximal number of rows + 1
@@ -810,7 +865,7 @@ def draw_checkerboard(img, max_rows=7, max_cols=7, fg_poly=None, transform_param
                 line=np.array([warped_points[row_idx * (cols + 1) + col_idx],
                                warped_points[row_idx * (cols + 1) + col_idx+1]])
                 # cv.line(img, (line[0,0], line[0,1]), (line[1,0], line[1,1]) ,col, thickness)
-                new_points = calc_salient_points_from_line(line, fg_poly, min_angle=15)
+                new_points = calc_salient_points_from_line(line, fg_poly, min_angle=min_angle)
                 points = append_points(points, new_points)
 
         for row_idx in range(0, rows ):
@@ -818,7 +873,7 @@ def draw_checkerboard(img, max_rows=7, max_cols=7, fg_poly=None, transform_param
                 line=np.array([warped_points[row_idx * (cols + 1) + col_idx],
                                warped_points[(row_idx+1) * (cols + 1) + col_idx]])
                 # cv.line(img, (line[0,0], line[0,1]), (line[1,0], line[1,1]) ,col, thickness)
-                new_points = calc_salient_points_from_line(line, fg_poly, min_angle=15)
+                new_points = calc_salient_points_from_line(line, fg_poly, min_angle=min_angle)
                 points = append_points(points, new_points)
     else:
 
@@ -827,7 +882,7 @@ def draw_checkerboard(img, max_rows=7, max_cols=7, fg_poly=None, transform_param
     return points
 
 
-def draw_stripes(img, max_nb_cols=13, min_width_ratio=0.04,fg_poly=None,
+def draw_stripes(img, max_nb_cols=13, min_width_ratio=0.04,fg_poly=None, min_angle=15,
                  transform_params=(0.05, 0.15)):
     """ Draw stripes in a distorted rectangle and output the interest points
     Parameters:
@@ -943,7 +998,7 @@ def draw_stripes(img, max_nb_cols=13, min_width_ratio=0.04,fg_poly=None,
                 line=np.array([warped_points[row_idx * (col + 1) + col_idx],
                                warped_points[row_idx * (col + 1) + col_idx+1]])
                 cv.line(img, (line[0,0], line[0,1]), (line[1,0], line[1,1]) ,color, thickness)
-                new_points = calc_salient_points_from_line(line, fg_poly, min_angle=15)
+                new_points = calc_salient_points_from_line(line, fg_poly, min_angle=min_angle)
                 points = append_points(points, new_points)
 
         for row_idx in range(0, 1 ):
@@ -951,7 +1006,7 @@ def draw_stripes(img, max_nb_cols=13, min_width_ratio=0.04,fg_poly=None,
                 line=np.array([warped_points[row_idx * (col + 1) + col_idx],
                                warped_points[(row_idx+1) * (col + 1) + col_idx]])
                 cv.line(img, (line[0,0], line[0,1]), (line[1,0], line[1,1]) ,color, thickness)
-                new_points = calc_salient_points_from_line(line, fg_poly, min_angle=15)
+                new_points = calc_salient_points_from_line(line, fg_poly, min_angle=min_angle)
                 points = append_points(points, new_points)
     else:
         # Keep only the points inside the image
@@ -959,8 +1014,8 @@ def draw_stripes(img, max_nb_cols=13, min_width_ratio=0.04,fg_poly=None,
     return points
 
 
-def draw_cube(img, min_size_ratio=0.2, min_angle_rot=pi / 10,
-              scale_interval=(0.4, 0.6), trans_interval=(0.5, 0.2),fg_poly=None):
+def draw_cube(img, min_size_ratio=0.2,
+              scale_interval=(0.4, 0.6), trans_interval=(0.5, 0.2),fg_poly=None, min_angle=15):
     """ Draw a 2D projection of a cube and output the corners that are visible
     Parameters:
       min_size_ratio: min(img.shape) * min_size_ratio is the smallest achievable
@@ -1045,16 +1100,13 @@ def draw_cube(img, min_size_ratio=0.2, min_angle_rot=pi / 10,
                              cube[faces[i][(j+1)%4]]])
             cv.line(img, (line[0, 0], line[0, 1]), (line[1, 0], line[1, 1]), col_edge, thickness)
             if not fg_poly is None:
-                new_points = calc_salient_points_from_line(line, fg_poly, min_angle=15)
+                new_points = calc_salient_points_from_line(line, fg_poly, min_angle=min_angle)
                 points = append_points(points, new_points)
-
-
-
 
     return points
 
 
-def gaussian_noise(img):
+def gaussian_noise(img, fg_poly=None, min_angle=None):
     """ Apply random noise to the image """
     cv.randu(img, 0, 255)
     return np.empty((0, 2), dtype=np.int)

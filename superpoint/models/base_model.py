@@ -307,6 +307,7 @@ class BaseModel(metaclass=ABCMeta):
 
         tf.compat.v1.logging.info('Start training')
         for i in range(iterations):
+            print(i)
             loss, summaries, _ = self.sess.run(
                     [self.loss, self.summaries, self.trainer],
                     feed_dict={self.handle: self.dataset_handles['training']},
@@ -315,18 +316,16 @@ class BaseModel(metaclass=ABCMeta):
             if save_interval and checkpoint_path and (i+1) % save_interval == 0:
                 self.save(checkpoint_path)
             if 'validation' in self.datasets and i % validation_interval == 0:
-                metrics = self.evaluate('validation', mute=True)
+                metrics = self.evaluate('validation', max_iterations=None, mute=False)
                 tf.compat.v1.logging.info(
                         'Iter {:4d}: loss {:.4f}'.format(i, loss) +
                         ''.join([', {} {:.4f}'.format(m, metrics[m]) for m in metrics]))
-
                 if output_dir is not None:
                     train_writer.add_summary(summaries, i)
                     metrics_summaries = tf.compat.v1.Summary(value=[
                         tf.compat.v1.Summary.Value(tag=m, simple_value=v)
                         for m, v in metrics.items()])
                     train_writer.add_summary(metrics_summaries, i)
-
                     if profile and i != 0:
                         fetched_timeline = timeline.Timeline(run_metadata.step_stats)
                         chrome_trace = fetched_timeline.generate_chrome_trace_format()

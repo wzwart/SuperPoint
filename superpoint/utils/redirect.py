@@ -59,14 +59,14 @@ def stdout_redirector(stream):
         tfile.close()
         os.close(saved_stdout_fd)
 
+if __name__ == '__main__':
+    #### Test it
+    f = io.BytesIO()
 
-#### Test it
-f = io.BytesIO()
+    with stdout_redirector(f):
+        print('foobar')
+        print(12)
+        libc.puts(b'this comes from C')
+        os.system('echo and this is from echo')
 
-with stdout_redirector(f):
-    print('foobar')
-    print(12)
-    libc.puts(b'this comes from C')
-    os.system('echo and this is from echo')
-
-print('Got stdout: "{0}"'.format(f.getvalue().decode('utf-8')))
+    print('Got stdout: "{0}"'.format(f.getvalue().decode('utf-8')))

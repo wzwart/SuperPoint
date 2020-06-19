@@ -11,6 +11,8 @@ from superpoint.models import get_model
 from superpoint.utils.stdout_capturing import capture_outputs
 from superpoint.utils.redirect import stdout_redirector
 from superpoint.settings import EXPER_PATH
+from tensorflow.python.client import device_lib
+
 
 logging.basicConfig(format='[%(asctime)s %(levelname)s] %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S', level=logging.INFO)
@@ -52,12 +54,12 @@ def predict(config, output_dir, n_iter):
 
 
 def set_seed(seed):
-    tf.compat.v1.set_random_seed(seed)
+    tf.set_random_seed(seed)
     np.random.seed(seed)
 
 def get_num_gpus():
-    local_device_protos = tf.python.client.device_lib.list_local_devices()
-    return len ([x.name for x in local_device_protos if x.device_type == 'GPU'])
+    local_device_protos = device_lib.list_local_devices()
+    return len([x.name for x in local_device_protos if x.device_type == 'GPU'])
 
 
 
@@ -77,7 +79,7 @@ def _init_graph(config, with_dataset=False):
     else:
         yield model
     model.__exit__()
-    tf.compat.v1.reset_default_graph()
+    tf.reset_default_graph()
 
 
 def _cli_train(config, output_dir, args):
